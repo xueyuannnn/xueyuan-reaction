@@ -8,6 +8,10 @@ const ms=x=>Number.isFinite(x)?x.toFixed(2):'—';
 let state={version:1,settings:{min:500,max:2000,rounds:10},runs:[],active:'',last:null,imageId:'example-v1',imageName:'示例图片'},db,renderer,image,previewUrl='',phase='loading',trial=null,run=null,aggregate=null,selected=null,notice='',storageError='',intervals=[],lastFrame=0,measured=null,sessionRate=null,baselineViewport='',revision=0,token=0,timers=new Set(),pointers=new Set(),rateChanges=0,wake=null,saving=Promise.resolve(),worker;
 const viewport=()=>`${Math.round(innerWidth)}x${Math.round(innerHeight)}@${devicePixelRatio}`;
 const active=()=>['preparing','round','feedback'].includes(phase);
+const portrait=window.matchMedia('(orientation: portrait)');
+function syncOrientation(){const blocked=portrait.matches;if(blocked){if(active())interrupt('设备已转为竖屏，测试已中止；请横屏继续');if(dialog.open)dialog.close();document.activeElement?.blur?.();}
+  app.inert=blocked;stage.inert=blocked;app.setAttribute('aria-hidden',String(blocked));stage.setAttribute('aria-hidden',String(blocked));$('#orientation-gate').setAttribute('aria-hidden',String(!blocked));}
+if(portrait.addEventListener)portrait.addEventListener('change',syncOrientation);else portrait.addListener(syncOrientation);
 function toast(text){const t=$('#toast');t.textContent=text;t.classList.add('visible');setTimeout(()=>t.classList.remove('visible'),4000);}
 function later(fn,delay){const id=setTimeout(()=>{timers.delete(id);fn();},delay);timers.add(id);return id;}
 function invalidate(){token++;for(const id of timers)clearTimeout(id);timers.clear();trial?.cancel();}
@@ -18,7 +22,7 @@ function saveRun(){if(!run)return;const snapshot=structuredClone(run),index=stat
   state.active=condition(snapshot);if(snapshot.scores.length)state.last=snapshot;persist();if(phase==='feedback'||!active())calculate();}
 function bind(id,fn){const el=document.getElementById(id);if(el)el.onclick=fn;}
 function header(title,subtitle='REACTION STABLE / 点击版',back=''){return `<header class="header"><div class="brand"><img src="./icon.svg" alt=""><div><div class="eyebrow">${subtitle}</div><div class="title-line"><h1>${title}</h1><span class="byline">by:xueyuan</span></div></div></div><div class="row">${back}<span class="badge" id="fps-badge"><i class="dot"></i>${measured?measured.fps+' fps · 页面实测':'正在检测页面帧率'}</span></div></header>`;}
-function chrome(body){app.hidden=false;canvas.hidden=true;stage.hidden=true;document.body.classList.remove('testing');app.innerHTML=`<div class="shell">${body}</div>`;app.setAttribute('aria-busy','false');}
+function chrome(body){app.hidden=false;canvas.hidden=true;stage.hidden=true;document.body.classList.remove('testing');app.innerHTML=`<div class="shell">${body}</div>`;app.setAttribute('aria-busy','false');syncOrientation();}
 function saveForm(){if(phase!=='setup')return;for(const k of ['min','max','rounds']){const el=$('#'+k);if(el)state.settings[k]=el.value;}persist();}
 function setup(){phase='setup';selected=null;const s=state.settings;
   chrome(header('手游延迟测试')+(notice?`<div class="notice">${esc(notice)}</div>`:'')+(storageError?`<div class="notice">${esc(storageError)}</div>`:'')+`<section class="setup"><div class="panel"><div class="row" style="justify-content:space-between"><h2>测试图片</h2><span class="tag">本地保存</span></div><div class="preview-wrap"><img id="preview" src="${previewUrl}" alt="${esc(state.imageName)}"></div><div class="preview-actions"><span class="filename" title="${esc(state.imageName)}">${esc(state.imageName)}</span><div class="row"><button class="quiet" id="example">使用示例</button><button id="choose">选择自定义图片</button></div></div></div><div class="panel"><div class="form-top"><h2>测试设置</h2><span class="tag">点击响应</span></div><div class="field"><label for="min">随机等待范围 <small>ms</small></label><div class="range"><input id="min" aria-label="最小等待时间" type="number" inputmode="numeric" min="200" max="60000" value="${esc(s.min)}"><span>—</span><input id="max" aria-label="最大等待时间" type="number" inputmode="numeric" min="200" max="60000" value="${esc(s.max)}"></div><small>图片在此范围内随机出现，避免预判时机。</small></div><div class="field"><label for="rounds">测试轮数</label><input class="rounds" id="rounds" aria-label="测试轮数" type="number" inputmode="numeric" min="1" max="100" value="${esc(s.rounds)}"><small>默认 10 轮，可设置 1–100 轮。</small></div><div class="instruction"><strong>看到图片，立即点击。</strong><br>可持续按住一指，用第二指响应。提前点击重测本轮。</div><p class="error-text" id="form-error" role="alert"></p><button class="primary start" id="start"><span>开始 ${esc(s.rounds)} 轮测试</span><span aria-hidden="true">↗</span></button></div></section><footer class="foot"><small>建议横屏 · 图片与成绩仅保存在此浏览器 · 点击即停止，不等抬起</small><div class="row"><button class="quiet" id="fullscreen">全屏</button><button class="quiet" id="help">计时与高刷说明</button>${state.last?.scores.length?'<button id="last">查看上次成绩</button>':''}<button id="manage">∑ 累计数据 ›</button></div></footer><input type="file" id="file" accept="image/*">`);
@@ -35,7 +39,7 @@ async function changeImage(file){if(active())return;saveForm();const button=$('#
     renderer.upload(next);image=next;if(previewUrl.startsWith('blob:'))URL.revokeObjectURL(previewUrl);previewUrl=blob?URL.createObjectURL(blob):next.toDataURL();state.imageId=id;state.imageName=name;await persist([['image',blob]]);setup();
   }catch(e){toast(e.message);if(button)button.disabled=false;}}
 function testMessage(title,subtitle,round=''){message.hidden=false;message.innerHTML=`${round?`<div class="test-round">${esc(round)}</div>`:''}<h2>${esc(title)}</h2><p>${esc(subtitle)}</p><small>可保持一指按住 · 用第二指点击 · Esc 结束</small>`;}
-async function start(){saveForm();let settings;try{settings=config(state.settings.min,state.settings.max,state.settings.rounds);}catch(e){$('#form-error').textContent=e.message;return;}
+async function start(){if(portrait.matches)return;saveForm();let settings;try{settings=config(state.settings.min,state.settings.max,state.settings.rounds);}catch(e){$('#form-error').textContent=e.message;return;}
   if(!renderer){toast('图形资源尚未准备好');return;}if(storageError){toast(storageError);return;}
   notice='';invalidate();const currentToken=token;phase='preparing';pointers.clear();sessionRate=null;intervals=[];lastFrame=0;rateChanges=0;baselineViewport=viewport();
   app.hidden=true;canvas.hidden=false;stage.hidden=false;stage.classList.remove('armed');document.body.classList.add('testing');message.hidden=false;renderer.resize();renderer.clear();
@@ -59,7 +63,7 @@ function respond(e){if(phase!=='round'||!trial)return;let time;try{time=eventTim
   const current=trial,result=current.touch(time);if(result==='false-start'){run.falseStarts++;feedback('抢跑','图片出现前点击 · 本轮重测');}
   else if(result==='valid'){run.scores.push(time-current.startMs);run.complete=run.scores.length>=run.target;feedback(`${ms(run.scores.at(-1))} ms`,`第 ${run.scores.length} / ${run.target} 轮成绩 · 2 秒后继续`);}
 }
-document.addEventListener('pointerdown',e=>{if(!active())return;if(e.target.closest?.('#stop'))return;e.preventDefault();if(e.pointerType==='mouse'&&e.button!==0)return;if(pointers.has(e.pointerId))return;pointers.add(e.pointerId);respond(e);},{capture:true,passive:false});
+document.addEventListener('pointerdown',e=>{if(!active()||portrait.matches)return;if(e.target.closest?.('#stop'))return;e.preventDefault();if(e.pointerType==='mouse'&&e.button!==0)return;if(pointers.has(e.pointerId))return;pointers.add(e.pointerId);respond(e);},{capture:true,passive:false});
 document.addEventListener('pointerup',e=>pointers.delete(e.pointerId),true);
 document.addEventListener('pointercancel',e=>{pointers.delete(e.pointerId);if(active())interrupt('触摸被系统取消，测试已中止');},true);
 document.addEventListener('contextmenu',e=>{if(active())e.preventDefault();});
@@ -70,7 +74,7 @@ bind('stop',()=>interrupt('已结束本次测试，已完成的有效成绩已�
 document.addEventListener('visibilitychange',()=>{if(document.hidden)interrupt('页面切到后台，测试已中止');});
 window.addEventListener('blur',()=>interrupt('页面失去焦点，测试已中止'));
 window.addEventListener('pagehide',()=>interrupt('页面已离开，测试已中止'));
-window.addEventListener('resize',()=>{if(active()&&viewport()!==baselineViewport)interrupt('屏幕尺寸、方向或全屏状态改变，测试已中止');if(!active())renderer?.resize();});
+window.addEventListener('resize',()=>{syncOrientation();if(active()&&viewport()!==baselineViewport)interrupt('屏幕尺寸、方向或全屏状态改变，测试已中止');if(!active())renderer?.resize();});
 canvas.addEventListener('webglcontextlost',e=>{e.preventDefault();interrupt('图形上下文已丢失，请重新载入页面');storageError='图形上下文已丢失，请重新载入页面';});
 document.addEventListener('keydown',e=>{if(e.key==='Escape'&&active()){e.preventDefault();interrupt('已结束本次测试');}});
 function frames(ts){if(lastFrame){const delta=ts-lastFrame;intervals.push(delta);if(intervals.length>120)intervals.shift();
@@ -99,7 +103,7 @@ function manager(id=null){phase='manager';selected=id;const a=aggregate,r=a?.rec
   document.querySelectorAll('[data-score]').forEach(b=>b.onclick=()=>{const i=+b.dataset.score;info(`第 ${i+1} 轮 · ${ms(r.scores[i])} ms`,r.used?`<p>参与累计拟合${r.flags[i]?'，偏离中位数 / MAD 参考范围':''}。偏离标记仅供参考，成绩不会被剔除。</p><p>累计中位数基准 ${ms(a.median)} ms<br>较基准 ${comparison(r.scores[i],a.median)}</p>`:'<p>本回合已暂停，或图片、等待范围、页面帧率、显示尺寸与当前累计条件不同。</p>');});
   bind('export',exportBackup);bind('import',()=>$('#import-file').click());$('#import-file').onchange=e=>importBackup(e.target.files[0]);
 }
-function info(title,body,extra=''){dialog.innerHTML=`<h2>${esc(title)}</h2>${body}<div class="actions">${extra}<button class="primary" id="dialog-close">知道了</button></div>`;dialog.showModal();bind('dialog-close',()=>dialog.close());}
+function info(title,body,extra=''){if(portrait.matches)return;dialog.innerHTML=`<h2>${esc(title)}</h2>${body}<div class="actions">${extra}<button class="primary" id="dialog-close">知道了</button></div>`;dialog.showModal();bind('dialog-close',()=>dialog.close());}
 function confirmAction(title,text,yes){info(title,`<p>${esc(text)}</p>`,'<button id="confirm-action" class="danger">确认</button>');bind('confirm-action',()=>{dialog.close();yes();});}
 function reset(){confirmAction('重置累计统计？','清除全部累计回合，拟合值从零重新积累。当前成绩、图片和测试设置保留。',()=>{state.runs=[];state.active='';persist();calculate();});}
 function fitHelp(){info('累计拟合说明',`<p>同图片、等待范围、页面帧率、显示尺寸与计时方案的已启用回合合并。满 8 条后开始拟合；8–49 条为初步估计，50 条也不是精度保证。</p><p>模型 T = Normal(μ, σ²) + Exp(均值 τ)。采用与安卓版本相同的多起点最大似然拟合，显示曲线峰值，不是算术平均值。</p><p>MAD 仅标记偏离：|0.67448975 × (成绩 − 中位数) / max(MAD, 1 ms)| &gt; 3.5。全部有效成绩仍参与统计和拟合。最近完整回合全部偏离，或连续 3 个回合各 ≥80% 偏离时提醒考虑重置。</p><p>变化基准是累计中位数，基准为零时不计算百分比。网页和安卓的计时链路不同，成绩不能合并或直接视为同一绝对基准。</p>`);}
