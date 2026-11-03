@@ -7,7 +7,7 @@ export class Stimulus {
     gl.linkProgram(p);if(!gl.getProgramParameter(p,gl.LINK_STATUS))throw Error('图形程序连接失败');gl.useProgram(p);this.program=p;this.pos=gl.getAttribLocation(p,'p');this.uv=gl.getAttribLocation(p,'uv');this.buffer=gl.createBuffer();gl.bindBuffer(gl.ARRAY_BUFFER,this.buffer);gl.clearColor(0,0,0,1);gl.disable(gl.DEPTH_TEST);
     this.resize();
   }
-  resize(){const ratio=devicePixelRatio||1;this.canvas.width=Math.round(innerWidth*ratio);this.canvas.height=Math.round(innerHeight*ratio);this.gl.viewport(0,0,this.canvas.width,this.canvas.height);}
+  resize(){const ratio=devicePixelRatio||1,rect=this.canvas.getBoundingClientRect();this.canvas.width=Math.round((rect.width||innerWidth)*ratio);this.canvas.height=Math.round((rect.height||innerHeight)*ratio);this.gl.viewport(0,0,this.canvas.width,this.canvas.height);}
   upload(image){const g=this.gl;if(this.texture)g.deleteTexture(this.texture);this.texture=g.createTexture();g.bindTexture(g.TEXTURE_2D,this.texture);
     for(const p of [g.TEXTURE_WRAP_S,g.TEXTURE_WRAP_T])g.texParameteri(g.TEXTURE_2D,p,g.CLAMP_TO_EDGE);
     for(const p of [g.TEXTURE_MIN_FILTER,g.TEXTURE_MAG_FILTER])g.texParameteri(g.TEXTURE_2D,p,g.LINEAR);

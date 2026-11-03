@@ -1,5 +1,5 @@
 import {fit,included,median,logPdf} from './fit.js';
-import {condition,comparison} from './core.js';
+import {condition,comparison} from './core.js?v=1.0.3';
 export function aggregate(runs,key){
   const participating=runs.filter(r=>r.enabled&&condition(r)===key),values=participating.flatMap(r=>r.scores),mask=included(values),model=fit(values),center=median(values);
   let i=0;const records=runs.map(r=>{const same=condition(r)===key,used=r.enabled&&same,flags=r.scores.map(()=>used?!mask[i++]:false);return {...r,same,used:used?r.scores.length:0,flags,median:median(r.scores)};});
