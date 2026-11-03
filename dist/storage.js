@@ -1,0 +1,3 @@
+export async function openStore(){return new Promise((resolve,reject)=>{const r=indexedDB.open('reaction-stable-web-click',1);r.onupgradeneeded=()=>r.result.createObjectStore('kv');r.onerror=()=>reject(r.error);r.onsuccess=()=>resolve(r.result);});}
+export function read(db,key){return new Promise((resolve,reject)=>{const r=db.transaction('kv').objectStore('kv').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}
+export function write(db,entries){return new Promise((resolve,reject)=>{const tx=db.transaction('kv','readwrite'),s=tx.objectStore('kv');for(const [key,value]of entries)s.put(value,key);tx.oncomplete=resolve;tx.onabort=tx.onerror=()=>reject(tx.error||Error('数据保存失败'));});}
