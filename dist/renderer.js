@@ -42,6 +42,13 @@ export class Stimulus {
     g.activeTexture(g.TEXTURE0);g.bindTexture(g.TEXTURE_2D,texture);g.drawArrays(g.TRIANGLE_STRIP,0,4);
   }
   draw(){this.render(this.texture,this.width,this.height);}
+  drawAndWait(){
+    this.draw();
+    const gl=this.gl;
+    gl.finish();
+    // WebKit may send finish asynchronously. getError waits for the ordered GPU-process reply.
+    if(gl.getError()!==gl.NO_ERROR||gl.isContextLost())throw Error('刺激帧 GPU 绘制失败，本次测试已中止');
+  }
   drawWaiting(){this.render(this.waitingTexture,this.waitingWidth,this.waitingHeight,true);}
   clear(){this.gl.clear(this.gl.COLOR_BUFFER_BIT);}
 }

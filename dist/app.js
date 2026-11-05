@@ -1,5 +1,5 @@
-import {Trial,eventTime,config,stats,signed,comparison,frequency,condition,viewportBox,FrameMonitor,validFrameTiming,frameWarning,SUBMIT_PROTOCOL,validProtocol,protocolLabel} from './core.js?v=1.0.4';
-import {Stimulus} from './renderer.js?v=1.0.4';
+import {Trial,eventTime,config,stats,signed,comparison,frequency,condition,viewportBox,FrameMonitor,validFrameTiming,frameWarning,GPU_FINISH_PROTOCOL,validProtocol,protocolLabel} from './core.js?v=1.0.5';
+import {Stimulus} from './renderer.js?v=1.0.5';
 import {openStore,read,write} from './storage.js';
 
 const $=s=>document.querySelector(s),app=$('#app'),stage=$('#test'),message=$('#message'),canvas=$('#stimulus'),dialog=$('#dialog');
@@ -57,7 +57,7 @@ function beginTest(settings){notice='';invalidate();const currentToken=token;pha
   testMessage('准备测试',displayMode()==='window'?'窗口模式 · 图片按网页可见区域中心显示':'正在预热图片与确认页面帧率，可保持一指按住',`即将开始 ${settings.rounds} 轮测试`);
   try{renderer.upload(image);navigator.wakeLock?.request('screen').then(w=>{if(active())wake=w;else w.release();}).catch(()=>{});}catch(e){interrupt(e.message);return;}
   later(()=>{if(token!==currentToken||phase!=='preparing')return;const f=frequency(intervals.slice(-80));sessionRate=f||{fps:0,raw:0,period:0};if(f)measured=f;monitor=new FrameMonitor(sessionRate.fps);baselineViewport=viewport();
-    run={id:crypto.randomUUID(),timestamp:Date.now(),...settings,target:settings.rounds,fps:sessionRate.fps,frameRaw:sessionRate.raw,frameTiming:monitor.data,displayMode:displayMode(),viewport:baselineViewport,imageId:state.imageId,imageName:state.imageName,mode:'click',protocol:SUBMIT_PROTOCOL,scores:[],falseStarts:0,enabled:true,complete:false,reason:''};saveRun();nextRound();},1600);
+    run={id:crypto.randomUUID(),timestamp:Date.now(),...settings,target:settings.rounds,fps:sessionRate.fps,frameRaw:sessionRate.raw,frameTiming:monitor.data,displayMode:displayMode(),viewport:baselineViewport,imageId:state.imageId,imageName:state.imageName,mode:'click',protocol:GPU_FINISH_PROTOCOL,scores:[],falseStarts:0,enabled:true,complete:false,reason:''};saveRun();nextRound();},1600);
 }
 function nextRound(){if(!active())return;invalidate();if(run.scores.length>=run.target){run.complete=true;saveRun();finish();return;}
   phase='round';stage.classList.remove('armed');trial=new Trial();const expected=trial,currentToken=token;
@@ -65,15 +65,20 @@ function nextRound(){if(!active())return;invalidate();if(run.scores.length>=run.
   trial.ready();const span=run.max-run.min+1,random=new Uint32Array(1);crypto.getRandomValues(random);const delay=run.min+Math.floor(random[0]/4294967296*span);
   later(()=>{if(token!==currentToken||trial!==expected||!trial.request())return;
     requestAnimationFrame(()=>{if(token!==currentToken||trial!==expected||phase!=='round')return;
-      // One GL frame replaces the waiting texture. Open input before issuing any stimulus draw.
-      if(!trial.arm(performance.now()))return;
-      try{renderer.draw();stage.classList.add('armed');canvas.setAttribute('aria-label','测试刺激图片');later(()=>interrupt('本轮长时间未响应，测试已中止'),30000);}catch(e){interrupt(e.message);}
+      try{
+        // Finish the stimulus drawing buffer and arm before returning it to the browser's compositor.
+        renderer.drawAndWait();
+        if(!trial.arm(performance.now()))return;
+        stage.classList.add('armed');
+        canvas.setAttribute('aria-label','测试刺激图片');
+        later(()=>interrupt('本轮长时间未响应，测试已中止'),30000);
+      }catch(e){interrupt(e.message);}
     });
   },delay);
 }
 function feedback(title,text){invalidate();phase='feedback';stage.classList.remove('armed');renderer.clear();testMessage(title,text);saveRun();later(nextRound,2000);}
 function respond(e){if(phase!=='round'||!trial)return;let time;try{time=eventTime(e.timeStamp,performance.timeOrigin,performance.now());}catch(error){interrupt(error.message);return;}
-  const current=trial,result=current.touch(time);if(result==='false-start'){run.falseStarts++;feedback('抢跑','发起显示前点击 · 本轮重测');}
+  const current=trial,result=current.touch(time);if(result==='false-start'){run.falseStarts++;feedback('抢跑','计时起点前点击 · 本轮重测');}
   else if(result==='valid'){run.scores.push(time-current.startMs);run.complete=run.scores.length>=run.target;feedback(`${ms(run.scores.at(-1))} ms`,`第 ${run.scores.length} / ${run.target} 轮成绩 · 2 秒后继续`);}
 }
 document.addEventListener('pointerdown',e=>{if(!active()||portrait.matches)return;if(e.target.closest?.('#stop'))return;e.preventDefault();if(e.pointerType==='mouse'&&e.button!==0)return;if(pointers.has(e.pointerId))return;pointers.add(e.pointerId);respond(e);},{capture:true,passive:false});
@@ -122,7 +127,7 @@ function info(title,body,extra=''){if(portrait.matches)return;dialog.innerHTML=`
 function confirmAction(title,text,yes){info(title,`<p>${esc(text)}</p>`,'<button id="confirm-action" class="danger">确认</button>');bind('confirm-action',()=>{dialog.close();yes();});}
 function reset(){confirmAction('重置累计统计？','清除全部累计回合，拟合值从零重新积累。当前成绩、图片和测试设置保留。',()=>{state.runs=[];state.active='';persist();calculate();});}
 function fitHelp(){info('累计拟合说明',`<p>同图片、等待范围、页面帧率、显示尺寸与计时方案的已启用回合合并。满 8 条后开始拟合；8–49 条为初步估计，50 条也不是精度保证。</p><p>模型 T = Normal(μ, σ²) + Exp(均值 τ)。采用与安卓版本相同的多起点最大似然拟合，显示曲线峰值，不是算术平均值。</p><p>MAD 仅标记偏离：|0.67448975 × (成绩 − 中位数) / max(MAD, 1 ms)| &gt; 3.5。全部有效成绩仍参与统计和拟合。最近完整回合全部偏离，或连续 3 个回合各 ≥80% 偏离时提醒考虑重置。</p><p>变化基准是累计中位数，基准为零时不计算百分比。网页和安卓的计时链路不同，成绩不能合并或直接视为同一绝对基准。</p>`);}
-function help(){saveForm();info('计时与高刷说明',`<p><strong>计时起点：</strong>图片和等待文字提前生成并上传到 GPU；同一 GL 画面直接由文字切换为图片。在刺激帧发起绘制前用 performance.now() 保存起点并结束抢跑判定，用 pointerdown 的原始 event.timeStamp 减去起点。包含后续绘制、提交及显示等待，不等 GPU 完成或抬起。新旧计时方案分别累计。</p><p><strong>浏览器限制：</strong>GPU 完成不代表浏览器已合成、屏幕已扫描或已经出光。浏览器会限制时间戳精度，两位小数仅为显示格式。网页不能保证与安卓原生版相同的绝对误差。</p><p><strong>高刷：</strong>网页不能申请通用的强制高刷权限。此处 fps 来自 requestAnimationFrame 的回调间隔估计，不是面板物理 Hz，也不代表触控采样率。Safari、设备、电量及省电设置会影响结果；120 Hz 屏幕不保证页面能达到 120 fps。</p><p>部分 Safari 版本在“设置 → App → Safari → 高级 → 功能标志”中提供 <em>Prefer Page Rendering Updates near 60Hz</em>。若存在，关闭后重启 Safari 再查看实测帧率；选项和效果取决于系统版本，网站不能替你修改。</p><p>测试前会优先请求网页全屏，画面按可见测试区域居中。部分 iPhone Safari 不提供网页全屏，请从分享菜单添加到主屏幕后打开；无法全屏时可明确选择按网页可见区域居中测试，不能保证手机整块物理屏幕中心。首次打开需要网络。图片与成绩保存在当前浏览器，清除网站数据会删除记录，可在累计管理页导出备份。</p><p>帧率变化或页面卡顿不再中止测试，会在结果页显示观测范围和卡顿情况；这些回合按变化条件单独累计。切后台、失焦、触摸取消、旋转、显示尺寸变化或退出全屏仍会中止测试并保留已完成成绩。</p><p><a href="https://webkit.github.io/explainers/animation-frame-rate/" target="_blank" rel="noopener">WebKit 高帧率说明</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/finish" target="_blank" rel="noopener">WebGL finish</a></p>`);}
+function help(){saveForm();info('计时与高刷说明',`<p><strong>计时起点：</strong>图片和等待文字提前生成并上传到 GPU；同一 GL 画面直接由文字切换为图片。刺激帧 GPU 绘制完成后，在交给浏览器合成前用 performance.now() 保存起点。用 pointerdown 的原始 event.timeStamp 减去起点，后续合成与显示等待计入成绩。新旧计时方案分别累计。</p><p><strong>浏览器限制：</strong>GPU 完成不代表浏览器已合成、屏幕已扫描或已经出光。浏览器会限制时间戳精度，两位小数仅为显示格式。网页不能保证与安卓原生版相同的绝对误差。</p><p><strong>高刷：</strong>网页不能申请通用的强制高刷权限。此处 fps 来自 requestAnimationFrame 的回调间隔估计，不是面板物理 Hz，也不代表触控采样率。Safari、设备、电量及省电设置会影响结果；120 Hz 屏幕不保证页面能达到 120 fps。</p><p>部分 Safari 版本在“设置 → App → Safari → 高级 → 功能标志”中提供 <em>Prefer Page Rendering Updates near 60Hz</em>。若存在，关闭后重启 Safari 再查看实测帧率；选项和效果取决于系统版本，网站不能替你修改。</p><p>测试前会优先请求网页全屏，画面按可见测试区域居中。部分 iPhone Safari 不提供网页全屏，请从分享菜单添加到主屏幕后打开；无法全屏时可明确选择按网页可见区域居中测试，不能保证手机整块物理屏幕中心。首次打开需要网络。图片与成绩保存在当前浏览器，清除网站数据会删除记录，可在累计管理页导出备份。</p><p>帧率变化或页面卡顿不再中止测试，会在结果页显示观测范围和卡顿情况；这些回合按变化条件单独累计。切后台、失焦、触摸取消、旋转、显示尺寸变化或退出全屏仍会中止测试并保留已完成成绩。</p><p><a href="https://webkit.github.io/explainers/animation-frame-rate/" target="_blank" rel="noopener">WebKit 高帧率说明</a> · <a href="https://developer.mozilla.org/en-US/docs/Web/API/WebGLRenderingContext/finish" target="_blank" rel="noopener">WebGL finish</a></p>`);}
 async function exportBackup(){try{const blob=await read(db,'image');let picture=null;if(blob)picture=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(blob);});const data=new Blob([JSON.stringify({format:'reaction-stable-web-click-v1',state,picture})],{type:'application/json'}),url=URL.createObjectURL(data),a=document.createElement('a');a.href=url;a.download=`reaction-stable-${new Date().toISOString().slice(0,10)}.json`;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}catch{toast('导出失败，请检查浏览器存储权限');}}
 async function importBackup(file){if(!file)return;try{if(file.size>30*1024*1024)throw Error('备份文件过大');const imported=JSON.parse(await file.text()),s=imported.state;if(imported.format!=='reaction-stable-web-click-v1'||!s||!Array.isArray(s.runs)||s.runs.length>10000)throw Error('这不是网页版点击模式的有效备份');config(s.settings.min,s.settings.max,s.settings.rounds);
     const validate=r=>r&&r.mode==='click'&&validProtocol(r.protocol)&&typeof r.id==='string'&&typeof r.viewport==='string'&&typeof r.imageId==='string'&&typeof r.imageName==='string'&&Number.isFinite(r.timestamp)&&Number.isFinite(r.fps)&&r.fps>=0&&validFrameTiming(r.frameTiming)&&(r.displayMode===undefined||['fullscreen','standalone','window'].includes(r.displayMode))&&typeof r.enabled==='boolean'&&typeof r.complete==='boolean'&&Number.isInteger(r.falseStarts)&&r.falseStarts>=0&&Array.isArray(r.scores)&&r.scores.length<=100&&r.scores.every(x=>Number.isFinite(x)&&x>=0&&x<=600000)&&(()=>{try{config(r.min,r.max,r.target);return true;}catch{return false;}})();
@@ -132,7 +137,7 @@ async function importBackup(file){if(!file)return;try{if(file.size>30*1024*1024)
   }catch(e){toast(e.message);}}
 async function initialize(){try{db=await openStore();const saved=await read(db,'state');if(saved?.version===1)state=saved;}catch{storageError='浏览器存储不可用，无法可靠保留成绩，请允许网站存储后重试';}
   try{renderer=new Stimulus(canvas);const stored=db?await read(db,'image'):null;image=stored?await decode(stored):example();previewUrl=stored?URL.createObjectURL(stored):image.toDataURL();renderer.upload(image);
-    worker=new Worker(new URL('./worker.js?v=1.0.4',import.meta.url),{type:'module'});worker.onmessage=({data})=>{if(data.revision!==revision)return;if(data.error){toast('拟合计算失败：'+data.error);return;}aggregate=data.data;if(phase==='results'){const slot=$('#aggregate');if(slot){slot.innerHTML=cumulative();bindCumulative();}}else if(phase==='manager')manager(selected);};worker.onerror=()=>toast('拟合计算线程无法启动，请重新载入页面');
+    worker=new Worker(new URL('./worker.js?v=1.0.5',import.meta.url),{type:'module'});worker.onmessage=({data})=>{if(data.revision!==revision)return;if(data.error){toast('拟合计算失败：'+data.error);return;}aggregate=data.data;if(phase==='results'){const slot=$('#aggregate');if(slot){slot.innerHTML=cumulative();bindCumulative();}}else if(phase==='manager')manager(selected);};worker.onerror=()=>toast('拟合计算线程无法启动，请重新载入页面');
     setup();calculate();requestAnimationFrame(frames);
     if('serviceWorker' in navigator&&window.isSecureContext)navigator.serviceWorker.register('./sw.js').catch(()=>{});
   }catch(e){phase='error';chrome(header('暂时无法开始测试')+`<div class="notice">${esc(e.message)}</div><p>请使用 Safari 或支持 WebGL 的现代浏览器，并启用图形加速后重新打开。</p>`);}}

@@ -1,6 +1,10 @@
 export const SUBMIT_PROTOCOL='webgl-submit-pointer-v2';
-export const validProtocol=p=>['webgl-finish-pointer-v1',SUBMIT_PROTOCOL].includes(p);
-export const protocolLabel=p=>p===SUBMIT_PROTOCOL?'显示发起起点':'旧 GPU 完成起点';
+export const GPU_FINISH_PROTOCOL='webgl-finish-pointer-v3';
+export const validProtocol=p=>['webgl-finish-pointer-v1',SUBMIT_PROTOCOL,GPU_FINISH_PROTOCOL].includes(p);
+export function protocolLabel(protocol){
+  if(protocol===GPU_FINISH_PROTOCOL)return 'GPU 完成起点';
+  return protocol===SUBMIT_PROTOCOL?'绘制前起点':'旧 GPU 完成起点';
+}
 // Milliseconds throughout. Browser timestamps never acquire invented nanosecond precision.
 export class Trial {
   stage='preparing'; startMs=NaN;
