@@ -1,3 +1,6 @@
+export const SUBMIT_PROTOCOL='webgl-submit-pointer-v2';
+export const validProtocol=p=>['webgl-finish-pointer-v1',SUBMIT_PROTOCOL].includes(p);
+export const protocolLabel=p=>p===SUBMIT_PROTOCOL?'显示发起起点':'旧 GPU 完成起点';
 // Milliseconds throughout. Browser timestamps never acquire invented nanosecond precision.
 export class Trial {
   stage='preparing'; startMs=NaN;
@@ -30,7 +33,7 @@ export function frequency(intervals){const a=intervals.filter(x=>x>0&&x<250).sor
   const nearest=rates.reduce((a,b)=>Math.abs(a-raw)<Math.abs(b-raw)?a:b);
   return {fps:Math.abs(raw-nearest)/nearest<.04?nearest:Math.round(raw),raw,period:dt,jitter:a[Math.floor(a.length*.9)]-a[Math.floor(a.length*.1)]};
 }
-export function condition(r){const timing=r.frameTiming;return ['webgl-finish-pointer-v1',r.imageId,r.min,r.max,r.fps,r.viewport].join('|')+(r.displayMode==='window'?'|window-v1':'')+(timing&&(timing.changed||timing.longGaps>0)?`|variable-fps-v1|${timing.minFps}|${timing.maxFps}`:'');}
+export function condition(r){const timing=r.frameTiming;return [r.protocol||'webgl-finish-pointer-v1',r.imageId,r.min,r.max,r.fps,r.viewport].join('|')+(r.displayMode==='window'?'|window-v1':'')+(timing&&(timing.changed||timing.longGaps>0)?`|variable-fps-v1|${timing.minFps}|${timing.maxFps}`:'');}
 export function viewportBox(visual,width,height){return {left:Number.isFinite(visual?.offsetLeft)?visual.offsetLeft:0,top:Number.isFinite(visual?.offsetTop)?visual.offsetTop:0,width:Number.isFinite(visual?.width)&&visual.width>0?visual.width:width,height:Number.isFinite(visual?.height)&&visual.height>0?visual.height:height};}
 export class FrameMonitor {
   constructor(initialFps){this.reference=initialFps;this.samples=[];this.votes=0;this.data={initialFps,minFps:initialFps,maxFps:initialFps,changed:false,maxGapMs:0,longGaps:0};}
